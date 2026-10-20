@@ -120,7 +120,7 @@ utf8_should_combine(const struct utf8_data *with, const struct utf8_data *add)
 	}
 
 	/* Emoji skin tone modifiers. */
-	switch (a) {
+	switch (w) {
 	case 0x0261D:
 	case 0x026F9:
 	case 0x0270A:
@@ -199,7 +199,7 @@ utf8_should_combine(const struct utf8_data *with, const struct utf8_data *add)
 	case 0x1F9DD:
 	case 0x1F9DE:
 	case 0x1F9DF:
-		if (w >= 0x1F3FB && w <= 0x1F3FF)
+		if (a >= 0x1F3FB && a <= 0x1F3FF)
 			return (1);
 		break;
 	}

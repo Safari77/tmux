@@ -1492,7 +1492,7 @@ screen_write_alignmenttest(struct screen_write_ctx *ctx)
 	s->rupper = 0;
 	s->rlower = screen_size_y(s) - 1;
 
-	screen_write_collect_clear(ctx, 0, screen_size_y(s) - 1);
+	screen_write_collect_clear(ctx, 0, screen_size_y(s));
 
 	screen_write_initctx(ctx, &ttyctx, 1, 1);
 
@@ -3057,8 +3057,13 @@ screen_write_combine(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 		case HANGULJAMO_STATE_COMPOSABLE:
 			break;
 		case HANGULJAMO_STATE_NOT_HANGULJAMO:
-			if (utf8_should_combine(ud, &last.data))
+			if (utf8_should_combine(&last.data, ud))
 				force_wide = 1;
+			/*
+			 * Characters must combine in valid Unicode order
+			 * (base glyph then modifier), so do not attempt
+			 * combining in reverse.
+			 */
 			else if (!utf8_has_zwj(&last.data))
 				return (0);
 			break;

@@ -489,7 +489,7 @@ fail:
 	else if (ud->width == 1)
 		*uc = UTF8_SET_SIZE(1)|UTF8_SET_WIDTH(1)|0x20;
 	else
-		*uc = UTF8_SET_SIZE(1)|UTF8_SET_WIDTH(1)|0x2020;
+		*uc = UTF8_SET_SIZE(2)|UTF8_SET_WIDTH(2)|0x2020;
 	return (UTF8_ERROR);
 }
 
@@ -676,6 +676,7 @@ utf8_fromwc(wchar_t wc, struct utf8_data *ud)
 {
 	int	size, width;
 
+	memset(ud, 0, sizeof *ud);
 #ifdef HAVE_UTF8PROC
 	size = utf8proc_wctomb(ud->data, wc);
 #else
@@ -995,10 +996,10 @@ utf8_padcstr(const char *s, u_int width)
 
 	slen = strlen(s);
 	out = xmalloc(slen + 1 + (width - n));
-	memcpy(out, s, slen);
-	for (i = n; i < width; i++)
-		out[slen++] = ' ';
-	out[slen] = '\0';
+	for (i = 0; i < width - n; i++)
+		out[i] = ' ';
+	memcpy(out + i, s, slen);
+	out[i + slen] = '\0';
 	return (out);
 }
 
@@ -1016,10 +1017,10 @@ utf8_rpadcstr(const char *s, u_int width)
 
 	slen = strlen(s);
 	out = xmalloc(slen + 1 + (width - n));
-	for (i = 0; i < width - n; i++)
-		out[i] = ' ';
-	memcpy(out + i, s, slen);
-	out[i + slen] = '\0';
+	memcpy(out, s, slen);
+	for (i = n; i < width; i++)
+		out[slen++] = ' ';
+	out[slen] = '\0';
 	return (out);
 }
 
