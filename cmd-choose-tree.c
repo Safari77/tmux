@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-choose-tree.c,v 1.61 2026/10/15 08:07:17 nicm Exp $ */
+/* $OpenBSD: cmd-choose-tree.c,v 1.64 2026/11/09 13:49:07 nicm Exp $ */
 
 /*
  * Copyright (c) 2012 Thomas Adam <thomas@xteddy.org>
@@ -40,8 +40,8 @@ const struct cmd_entry cmd_choose_tree_entry = {
 	.description = "Browse sessions and windows interactively.",
 	.alias = NULL,
 
-	.args = { "F:f:GhK:kNO:rst:wyZ", 0, 1, cmd_choose_tree_args_parse },
-	.usage = "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] "
+	.args = { "F:f:GhiK:kNO:rst:wyZ", 0, 1, cmd_choose_tree_args_parse },
+	.usage = "[-GhikNrswyZ] [-F format] [-f filter] [-K key-format] "
 		 "[-O sort-order] " CMD_TARGET_PANE_USAGE " [template]",
 
 	.target = { 't', CMD_FIND_PANE, 0 },
@@ -56,7 +56,7 @@ const struct cmd_entry cmd_choose_client_entry = {
 	.alias = NULL,
 
 	.args = { "F:f:hiK:kNO:rt:yZ", 0, 1, cmd_choose_tree_args_parse },
-	.usage = "[-hikNrZ] [-F format] [-f filter] [-K key-format] "
+	.usage = "[-hikNryZ] [-F format] [-f filter] [-K key-format] "
 		 "[-O sort-order] " CMD_TARGET_PANE_USAGE " [template]",
 
 	.target = { 't', CMD_FIND_PANE, 0 },
@@ -71,7 +71,7 @@ const struct cmd_entry cmd_choose_buffer_entry = {
 	.alias = NULL,
 
 	.args = { "F:f:K:kNO:rt:yZ", 0, 1, cmd_choose_tree_args_parse },
-	.usage = "[-kNrZ] [-F format] [-f filter] [-K key-format] "
+	.usage = "[-kNryZ] [-F format] [-f filter] [-K key-format] "
 		 "[-O sort-order] " CMD_TARGET_PANE_USAGE " [template]",
 
 	.target = { 't', CMD_FIND_PANE, 0 },
@@ -86,7 +86,7 @@ const struct cmd_entry cmd_customize_mode_entry = {
 	.alias = NULL,
 
 	.args = { "F:f:kNt:yZ", 0, 0, NULL },
-	.usage = "[-kNZ] [-F format] [-f filter] " CMD_TARGET_PANE_USAGE,
+	.usage = "[-kNyZ] [-F format] [-f filter] " CMD_TARGET_PANE_USAGE,
 
 	.target = { 't', CMD_FIND_PANE, 0 },
 
@@ -114,8 +114,8 @@ const struct cmd_entry cmd_display_panes_entry = {
 	.description = "Display pane numbers.",
 	.alias = "displayp",
 
-	.args = { "d:kNs:t:Z", 0, 1, cmd_choose_tree_args_parse },
-	.usage = "[-kNZ] [-d duration] [-s source-window] "
+	.args = { "d:kNPs:t:Z", 0, 1, cmd_choose_tree_args_parse },
+	.usage = "[-kNPZ] [-d duration] [-s source-window] "
 		 CMD_TARGET_PANE_USAGE " [template]",
 
 	.source = { 's', CMD_FIND_WINDOW, 0 },
@@ -172,7 +172,11 @@ cmd_choose_tree_exec(struct cmd *self, struct cmdq_item *item)
 		free(path);
 		return (CMD_RETURN_WAIT);
 	}
-	window_pane_set_mode(wp, NULL, mode, item, target, args);
+	if (window_pane_set_mode(wp, NULL, mode, item, target, args) == 0 &&
+	    mode == &window_panes_mode &&
+	    args_has(args, 'P') &&
+	    (c == NULL || c->session == NULL || (c->flags & CLIENT_CONTROL)))
+		return (CMD_RETURN_WAIT);
 	return (CMD_RETURN_NORMAL);
 }
 

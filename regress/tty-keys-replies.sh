@@ -8,6 +8,7 @@ PATH=/bin:/usr/bin
 TERM=screen
 
 [ -z "$TEST_TMUX" ] && TEST_TMUX=$(readlink -f ../tmux)
+command -v python3 >/dev/null || exit 101
 
 python3 -B - "$TEST_TMUX" <<'PY'
 import fcntl
@@ -59,7 +60,8 @@ def matches(name, value):
             "kittygraphics", "margins", "sync", "usstyle", "progressbar"} <= features
     if name == "XDA-WezTerm":
         return kind == "WezTerm 20240203-110809-5046fc22" and {
-            "sixel", "margins", "usstyle"} <= features
+            "sixel", "overline", "sync", "usstyle"} <= features and \
+            "margins" not in features
     if name == "sync":
         return "sync" in features
     if name.startswith("kitty-graphics"):

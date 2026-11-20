@@ -1,4 +1,4 @@
-/* $OpenBSD: tty.c,v 1.494 2026/10/16 16:56:03 nicm Exp $ */
+/* $OpenBSD: tty.c,v 1.498 2026/11/13 16:47:32 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -36,7 +36,9 @@
 static int	tty_log_fd = -1;
 
 static void	tty_start_timer_callback(int, short, void *);
+static void	tty_start_start_timer(struct tty *);
 static void	tty_clipboard_query_callback(int, short, void *);
+static void	tty_send_size_query(struct tty *, int);
 static void	tty_set_italics(struct tty *);
 static int	tty_try_colour(struct tty *, int, const char *);
 static void	tty_force_cursor_colour(struct tty *, int);
@@ -115,6 +117,16 @@ tty_init(struct tty *tty, struct client *c)
 	return (0);
 }
 
+static void
+tty_send_size_query(struct tty *tty, int apply)
+{
+	tty_puts(tty, "\033[18t\033[14t");
+	tty->flags |= (TTY_WINSZQUERY|TTY_WINSZPIXELS);
+	if (apply)
+		tty->flags |= TTY_WINSZAPPLY;
+	tty_start_start_timer(tty);
+}
+
 void
 tty_resize(struct tty *tty)
 {
@@ -137,12 +149,10 @@ tty_resize(struct tty *tty)
 			ypixel = ws.ws_ypixel / sy;
 
 		if ((xpixel == 0 || ypixel == 0) &&
-		    tty->out != NULL &&
-		    !(tty->flags & TTY_WINSIZEQUERY) &&
-		    (tty->term->flags & TERM_VT100LIKE)) {
-			tty_puts(tty, "\033[18t\033[14t");
-			tty->flags |= TTY_WINSIZEQUERY;
-		}
+		    (tty->flags & TTY_STARTED) &&
+		    !(tty->flags & (TTY_WINSZQUERY|TTY_WINSZPIXELS)) &&
+		    (tty->term->flags & TERM_VT100LIKE))
+			tty_send_size_query(tty, 0);
 	} else {
 		sx = 80;
 		sy = 24;
@@ -327,7 +337,11 @@ tty_start_timer_callback(__unused int fd, __unused short events, void *data)
 		tty_update_features(tty);
 	tty->flags |= TTY_ALL_REQUEST_FLAGS;
 
+	if (tty->flags & TTY_WINSZQUERY)
+		log_debug("%s: size query timed out", c->name);
+
 	tty->flags &= ~(TTY_WAITBG|TTY_WAITFG);
+	tty->flags &= ~(TTY_WINSZQUERY|TTY_WINSZPIXELS|TTY_WINSZAPPLY);
 }
 
 static void
@@ -482,6 +496,7 @@ tty_stop_tty(struct tty *tty)
 
 	evtimer_del(&tty->start_timer);
 	evtimer_del(&tty->clipboard_timer);
+	tty->flags &= ~(TTY_WINSZQUERY|TTY_WINSZPIXELS|TTY_WINSZAPPLY);
 
 	event_del(&tty->timer);
 	tty->flags &= ~TTY_BLOCK;
@@ -527,6 +542,10 @@ tty_stop_tty(struct tty *tty)
 	tty_raw(tty, tty_term_string(tty->term, TTYC_DSFCS));
 	tty_raw(tty, tty_term_string(tty->term, TTYC_DSEKS));
 
+#ifdef ENABLE_IMAGES
+	image_tty_free(tty, 1);
+#endif
+
 	if (tty_use_margin(tty))
 		tty_raw(tty, tty_term_string(tty->term, TTYC_DSMG));
 	if (options_get_number(global_options, "clear-on-attach"))
@@ -549,7 +568,7 @@ tty_close(struct tty *tty)
 
 	if (tty->flags & TTY_OPENED) {
 #ifdef ENABLE_IMAGES
-		image_tty_free(tty);
+		image_tty_free(tty, 0);
 #endif
 		evbuffer_free(tty->in);
 		event_del(&tty->event_in);
@@ -568,7 +587,7 @@ tty_free(struct tty *tty)
 {
 	tty_close(tty);
 #ifdef ENABLE_IMAGES
-	image_tty_free(tty);
+	image_tty_free(tty, 0);
 #endif
 }
 
@@ -1719,6 +1738,10 @@ tty_cmd_reverseindex(struct tty *tty, const struct tty_ctx *ctx)
 		tty_putcode(tty, TTYC_RI);
 	else
 		tty_putcode_i(tty, TTYC_RIN, 1);
+#ifdef ENABLE_IMAGES
+	image_scroll(tty, ctx->xoff, ctx->yoff + ctx->orupper, ctx->sx,
+	    ctx->orlower - ctx->orupper + 1, -1);
+#endif
 }
 
 void
@@ -1760,6 +1783,10 @@ tty_cmd_linefeed(struct tty *tty, const struct tty_ctx *ctx)
 		tty_cursor_pane(tty, ctx, ctx->ocx, ctx->ocy);
 
 	tty_putc(tty, '\n');
+#ifdef ENABLE_IMAGES
+	image_scroll(tty, ctx->xoff, ctx->yoff + ctx->orupper, ctx->sx,
+	    ctx->orlower - ctx->orupper + 1, 1);
+#endif
 }
 
 void
@@ -1798,6 +1825,10 @@ tty_cmd_scrollup(struct tty *tty, const struct tty_ctx *ctx)
 			tty_cursor(tty, 0, tty->cy);
 		tty_putcode_i(tty, TTYC_INDN, ctx->n);
 	}
+#ifdef ENABLE_IMAGES
+	image_scroll(tty, ctx->xoff, ctx->yoff + ctx->orupper, ctx->sx,
+	    ctx->orlower - ctx->orupper + 1, ctx->n);
+#endif
 }
 
 void
@@ -1831,6 +1862,10 @@ tty_cmd_scrolldown(struct tty *tty, const struct tty_ctx *ctx)
 		for (i = 0; i < ctx->n; i++)
 			tty_putcode(tty, TTYC_RI);
 	}
+#ifdef ENABLE_IMAGES
+	image_scroll(tty, ctx->xoff, ctx->yoff + ctx->orupper, ctx->sx,
+	    ctx->orlower - ctx->orupper + 1, -(int)ctx->n);
+#endif
 }
 
 void
@@ -2433,7 +2468,7 @@ tty_attributes(struct tty *tty, const struct grid_cell *gc,
 {
 	struct grid_cell	*tc = &tty->cell, gc2;
 	struct colour_palette	*palette;
-	int			 changed;
+	int			 c, changed;
 
 	/* Use default style if not given. */
 	if (style_ctx == NULL)
@@ -2448,12 +2483,24 @@ tty_attributes(struct tty *tty, const struct grid_cell *gc,
 		if (gc2.bg == 8)
 			gc2.bg = style_ctx->defaults->bg;
 		if (palette != NULL) {
-			changed = colour_palette_get(palette, gc2.fg);
+			/*
+			 * If bold uses bright colours, look up the bright
+			 * foreground before applying the palette and dimming.
+			 */
+			c = gc2.fg;
+			if (c < 8 &&
+			    gc2.attr & GRID_ATTR_BRIGHT &&
+			    !tty_term_has(tty->term, TTYC_NOBR))
+				c += 90;
+			changed = colour_palette_get(palette, c);
 			if (changed != -1)
 				gc2.fg = changed;
 			changed = colour_palette_get(palette, gc2.bg);
 			if (changed != -1)
 				gc2.bg = changed;
+			changed = colour_palette_get(palette, gc2.us);
+			if (changed != -1)
+				gc2.us = changed;
 		}
 	}
 	gc2.fg = tty_map_theme_colour(tty, gc2.fg);
@@ -2755,7 +2802,7 @@ tty_check_bg(struct tty *tty, struct colour_palette *palette,
 }
 
 static void
-tty_check_us(__unused struct tty *tty, struct colour_palette *palette,
+tty_check_us(struct tty *tty, struct colour_palette *palette,
     struct grid_cell *gc)
 {
 	int	c;
@@ -3006,6 +3053,19 @@ tty_clipboard_query(struct tty *tty)
 		tty->flags |= TTY_OSC52QUERY;
 		evtimer_add(&tty->clipboard_timer, &tv);
 	}
+}
+
+void
+tty_size_query(struct tty *tty)
+{
+	if (!(tty->flags & TTY_STARTED) ||
+	    tty->out == NULL ||
+	    tty->client->flags & CLIENT_CONTROL ||
+	    !(tty->term->flags & TERM_VT100LIKE) ||
+	    tty->flags & (TTY_WINSZQUERY|TTY_WINSZPIXELS))
+		return;
+	log_debug("%s: querying terminal size", tty->client->name);
+	tty_send_size_query(tty, 1);
 }
 
 void

@@ -129,14 +129,17 @@ class Terminal:
         else:
             assert command in b'hlcqnt', (params, chr(command))
 
+    def apc(self, data):
+        """Ignore application controls unless a subclass handles them."""
+
     def feed(self, data):
         """Apply complete output sequences, keeping any unfinished sequence."""
         data = self.pending + bytes(data)
         pos = 0
         while pos < len(data):
             rest = data[pos:]
-            if rest.startswith((b'\033P', b'\033]')):
-                match = re.match(rb'\033([P\]])(.*?)(?:\007|\033\\)',
+            if rest.startswith((b'\033P', b'\033]', b'\033_')):
+                match = re.match(rb'\033([P\]_])(.*?)(?:\007|\033\\)',
                     rest, re.S)
                 if match is None:
                     break
@@ -150,6 +153,8 @@ class Terminal:
                             if colour is not None:
                                 self.pixels[self.x * self.cw + i % w,
                                     self.y * self.ch + i // w] = colour
+                if match[1] == b'_':
+                    self.apc(match[2])
                 pos += match.end()
             elif rest.startswith(b'\033['):
                 match = re.match(rb'\033\[([0-?]*[ -/]*)([@-~])', rest)
@@ -161,8 +166,14 @@ class Terminal:
                 match = re.match(rb'\033(?:[()][0-~]|.)', rest, re.S)
                 if match is None:
                     break
-                assert match[0] in (b'\033(B', b'\033(0', b'\033)B',
-                    b'\033=', b'\033>', b'\033\\'), match[0]
+                if match[0] == b'\033M':
+                    if self.y == self.top:
+                        self.scroll(self.top, self.bottom, -1)
+                    else:
+                        self.y = max(0, self.y - 1)
+                else:
+                    assert match[0] in (b'\033(B', b'\033(0', b'\033)B',
+                        b'\033=', b'\033>', b'\033\\'), match[0]
                 pos += match.end()
             elif rest[0] < 32 or rest[0] == 127:
                 if rest[0] == 13:

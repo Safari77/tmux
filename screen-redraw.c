@@ -1,4 +1,4 @@
-/* $OpenBSD: screen-redraw.c,v 1.170 2026/10/16 14:26:08 nicm Exp $ */
+/* $OpenBSD: screen-redraw.c,v 1.173 2026/11/16 14:00:11 nicm Exp $ */
 
 /*
  * Copyright (c) 2026 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -256,6 +256,7 @@ struct redraw_build_ctx {
 	u_int					 sy;
 
 	int					 ind;
+	int					 border_type;
 
 	struct redraw_build_cell		*cells;
 };
@@ -271,6 +272,8 @@ struct redraw_draw_ctx {
 	u_int			 side_left;
 	enum pane_lines		 pane_lines;
 	struct grid_cell	 default_gc;
+	u_int			 default_dim;
+	int			 border_type;
 
 	int			 flags;
 #define REDRAW_ISOLATES 0x1
@@ -334,6 +337,7 @@ redraw_set_context(struct client *c, struct redraw_build_ctx *bctx)
 	redraw_get_window_offset(c, &bctx->ox, &bctx->oy, &bctx->sx, &bctx->sy);
 
 	bctx->ind = options_get_number(w->options, "pane-border-indicators");
+	bctx->border_type = options_get_number(w->options, "pane-border-type");
 }
 
 /* Return a cell. */
@@ -563,7 +567,7 @@ redraw_mark_border_cell(struct redraw_build_ctx *bctx, int wx, int wy,
 {
 	struct redraw_build_cell	*bc;
 	u_int				 x, y;
-	int				 reset = 0;
+	int				 reset = 0, side_owner, above, left;
 
 	if (!redraw_window_to_scene(bctx, wx, wy, &x, &y))
 		return;
@@ -593,6 +597,26 @@ redraw_mark_border_cell(struct redraw_build_ctx *bctx, int wx, int wy,
 		bc->data.type = REDRAW_SPAN_BORDER;
 	}
 
+	/*
+	 * A corner cell can be shared by four tiled panes, two on each side,
+	 * and only one pane is kept for each side. So that none is lost
+	 * whatever order panes are marked in, a pane keeps its corner only on
+	 * the side clockwise from it: a pane above and to the left of the cell
+	 * is the top pane, above and to the right is the right pane, and so on.
+	 */
+	side_owner = (mask & (REDRAW_BORDER_U|REDRAW_BORDER_D));
+	if (!floating &&
+	    (mask == REDRAW_BORDER_L ||
+	    mask == REDRAW_BORDER_R ||
+	    mask == REDRAW_BORDER_U ||
+	    mask == REDRAW_BORDER_D)) {
+		above = (wy >= wp->yoff + (int)wp->sy);
+		left = (wx >= wp->xoff + (int)wp->sx);
+		top_owner = (above && left);
+		bottom_owner = (!above && !left);
+		side_owner = (above != left);
+	}
+
 	if (top_owner) {
 		bc->data.b.top_wp = wp;
 		bc->data.b.top_lines = pane_lines;
@@ -602,7 +626,7 @@ redraw_mark_border_cell(struct redraw_build_ctx *bctx, int wx, int wy,
 		bc->data.b.bottom_lines = pane_lines;
 	}
 
-	if (mask & (REDRAW_BORDER_U|REDRAW_BORDER_D)) {
+	if (side_owner) {
 		if (wx < wp->xoff) {
 			bc->data.b.right_wp = wp;
 			bc->data.b.right_lines = pane_lines;
@@ -715,6 +739,8 @@ redraw_mark_pane_borders(struct redraw_build_ctx *bctx, struct window_pane *wp,
 	if (floating && pane_lines == PANE_LINES_NONE)
 		return;
 	pane_status = window_pane_get_pane_status(wp);
+	if (bctx->border_type != PANE_BORDER_TYPE_JOINED)
+		pane_status = PANE_STATUS_OFF; /* both borders are drawn */
 
 	left = wp->xoff - 1;
 	right = wp->xoff + wp->sx;
@@ -1325,12 +1351,14 @@ redraw_get_default_border_style(struct redraw_draw_ctx *dctx,
 	struct session		*s = c->session;
 	struct options		*oo = scene->w->options;
 	struct format_tree	*ft;
+	struct style		*sy;
 	struct grid_cell	*dgc = &dctx->default_gc;
 
 	if (~dctx->flags & REDRAW_DEFAULT_SET) {
 		ft = format_create_defaults(NULL, c, s, s->curw, NULL);
 		memcpy(dgc, &grid_default_cell, sizeof *dgc);
-		style_add(dgc, oo, "pane-border-style", ft);
+		sy = style_add(dgc, oo, "pane-border-style", ft);
+		dctx->default_dim = sy->dim;
 		format_free(ft);
 		dctx->pane_lines = options_get_number(oo, "pane-border-lines");
 		dctx->flags |= REDRAW_DEFAULT_SET;
@@ -1408,19 +1436,28 @@ redraw_draw_border_span(struct redraw_draw_ctx *dctx,
 	struct window		*w = scene->w;
 	struct window_pane	*wp = NULL;
 	struct grid_cell	 gc;
+	struct tty_style_ctx	 style_ctx = { 0 };
 	enum pane_lines		 pane_lines;
 	u_int			 i, cell_type;
-	int			 isolates = 0;
+	int			 isolates = 0, blank = 0;
+
+	style_ctx.defaults = &grid_default_cell;
 
 	if (span->data.type != REDRAW_SPAN_BORDER)
 		cell_type = CELL_NONE;
 	else {
 		wp = redraw_get_pane_for_border_style(dctx, span);
 		cell_type = span->data.b.cell_type;
+		/* separate-active only draws the active pane's border. */
+		if (dctx->border_type == PANE_BORDER_TYPE_SEPARATE_ACTIVE &&
+		    (dctx->active == NULL ||
+		    !redraw_data_has_pane(&span->data, dctx->active)))
+			blank = 1;
 	}
 
 	if (wp == NULL) {
 		redraw_get_default_border_style(dctx, &gc, &pane_lines);
+		style_ctx.dim = dctx->default_dim;
 		if (span->data.type == REDRAW_SPAN_OUTSIDE)
 			window_get_fill_cell(w, 0, &gc);
 		else if (span->data.type == REDRAW_SPAN_EMPTY)
@@ -1431,15 +1468,20 @@ redraw_draw_border_span(struct redraw_draw_ctx *dctx,
 			window_get_border_cell(NULL, pane_lines, cell_type, &gc);
 		}
 	} else {
-		window_pane_get_border_style(wp, c, &gc);
+		window_pane_get_border_style(wp, c, &gc, &style_ctx.dim);
 		window_pane_get_border_cell(wp, cell_type, &gc);
 	}
 
-	if (span->data.type == REDRAW_SPAN_BORDER &&
+	if (!blank &&
+	    span->data.type == REDRAW_SPAN_BORDER &&
 	    dctx->marked != NULL &&
 	    redraw_data_has_pane(&span->data, dctx->marked))
 		gc.attr ^= GRID_ATTR_REVERSE;
-	redraw_draw_border_arrow(dctx, span, &gc);
+	if (blank) {
+		gc.attr &= ~GRID_ATTR_CHARSET;
+		utf8_set(&gc.data, ' ');
+	} else
+		redraw_draw_border_arrow(dctx, span, &gc);
 
 	if (cell_type == CELL_UD && (dctx->flags & REDRAW_ISOLATES))
 		isolates = 1;
@@ -1447,7 +1489,7 @@ redraw_draw_border_span(struct redraw_draw_ctx *dctx,
 	if (isolates)
 		tty_puts(tty, REDRAW_END_ISOLATE);
 	for (i = 0; i < n; i++)
-		tty_cell(tty, &gc, NULL);
+		tty_cell(tty, &gc, &style_ctx);
 	if (isolates)
 		tty_puts(tty, REDRAW_START_ISOLATE);
 }
@@ -1462,13 +1504,18 @@ redraw_draw_status_span(struct redraw_draw_ctx *dctx,
 	struct tty		*tty = &c->tty;
 	struct window_pane	*wp = span->data.st.wp;
 	struct screen		*s = &wp->status_screen;
+	struct tty_style_ctx	 style_ctx = { 0 };
 	u_int			 px, sx = screen_size_x(s);
+
+	style_ctx.defaults = &grid_default_cell;
+	style_ctx.dim = wp->status_dim;
+	style_ctx.hyperlinks = s->hyperlinks;
 
 	px = span->data.st.offset + (x - dctx->side_left - span->x);
 	if (px < sx) {
 		if (n > sx - px)
 			n = sx - px;
-		tty_draw_line(tty, s, px, 0, n, x, y, NULL);
+		tty_draw_line(tty, s, px, 0, n, x, y, &style_ctx);
 	}
 }
 
@@ -1560,6 +1607,9 @@ redraw_draw_menu_span(struct redraw_draw_ctx *dctx,
 	struct screen		*s = menu_screen(span->data.m.md);
 	u_int			 px;
 
+#ifdef ENABLE_IMAGES
+	image_redraw_start(tty, x, y, n, 1);
+#endif
 	px = span->data.m.px + (x - dctx->side_left - span->x);
 	tty_draw_line(tty, s, px, span->data.m.py, n, x, y, NULL);
 }
@@ -1822,6 +1872,7 @@ redraw_set_draw_context(struct redraw_draw_ctx *dctx,
 	struct client	*c = scene->c;
 	struct session	*s = c->session;
 	struct options	*oo = s->options;
+	struct window	*w = s->curw->window;
 	struct tty	*tty = &c->tty;
 	u_int		 lines;
 
@@ -1830,7 +1881,8 @@ redraw_set_draw_context(struct redraw_draw_ctx *dctx,
 
 	if (server_is_marked(s, s->curw, marked_pane.wp))
 		dctx->marked = marked_pane.wp;
-	dctx->active = s->curw->window->active;
+	dctx->active = w->active;
+	dctx->border_type = options_get_number(w->options, "pane-border-type");
 
 	lines = status_line_size(c);
 	if (options_get_number(oo, "status-position") == 0)
@@ -1903,6 +1955,9 @@ redraw_draw_pane_prompt(struct redraw_draw_ctx *dctx, struct window_pane *wp)
 	if (px + width > sx)
 		width = sx - px;
 
+#ifdef ENABLE_IMAGES
+	image_redraw_start(tty, side_left + px, cy, width, 1);
+#endif
 	redraw_make_pane_prompt(wp, &screen);
 	tty_draw_line(tty, &screen, offset, 0, width, side_left + px, cy, NULL);
 	screen_free(&screen);
@@ -2069,6 +2124,10 @@ redraw_draw(struct client *c, struct window_pane *wp, int flags)
 			tty_draw_line(tty, sl, 0, i, tty->sx, 0, y + i, NULL);
 	}
 
+#ifdef ENABLE_IMAGES
+	image_redraw_finish(tty);
+#endif
+
 	tty_reset(tty);
 
 	log_debug("%s: finished @%u redraw", c->name, scene->w->id);
@@ -2190,6 +2249,9 @@ redraw_damage_draw_pane_prompt(struct redraw_draw_ctx *dctx,
 		width = span->width;
 		if (width > screen_size_x(&screen) - px)
 			width = screen_size_x(&screen) - px;
+#ifdef ENABLE_IMAGES
+		image_redraw_start(tty, x, y, width, 1);
+#endif
 		tty_draw_line(tty, &screen, px, 0, width, x, y, NULL);
 	}
 	screen_free(&screen);
@@ -2295,6 +2357,9 @@ redraw_draw_damage_rectangle(struct redraw_draw_ctx *dctx, u_int x, u_int y,
 			redraw_draw_span(dctx, span, cy, REDRAW_TEXT);
 		}
 	}
+#ifdef ENABLE_IMAGES
+	image_redraw_finish(&scene->c->tty);
+#endif
 }
 
 /* Draw pending window damage on this client. */

@@ -1,4 +1,4 @@
-/* $OpenBSD: key-bindings.c,v 1.196 2026/10/20 06:45:56 nicm Exp $ */
+/* $OpenBSD: key-bindings.c,v 1.199 2026/11/16 20:40:55 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -53,7 +53,6 @@
 	" '#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}' '>' {send -X history-bottom}" \
 	" ''" \
 	" '#{?#{==:#{pane_mode},copy-mode},#{?copy_line_numbers,Hide Line Numbers,Show Line Numbers},}' 'L' {send -X line-numbers-toggle}" \
-	" '#{?#{==:#{pane_mode},copy-mode},Edit,}' 'e' {if -F '#{selection_present}' {send -X open-selection} {send -X open-output}}" \
 	" '#{?#{==:#{pane_mode},copy-mode},#{?refresh_active,Refresh Off,Refresh On},}' 'r' {send -X refresh-toggle}" \
 	" ''" \
 	" '#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}' 'p' {paste-buffer}" \
@@ -398,8 +397,8 @@ key_bindings_init(void)
 		"bind -N 'Prompt for window index to select' \"'\" { command-prompt -pindex { select-window -t ':%%' } }",
 		"bind -N 'New floating pane' * { new-pane }",
 		"bind -N 'Toggle pane between floating and tiled' @ { if -F '#{pane_floating_flag}' { join-pane } { break-pane -W } }",
-		"bind -N 'Switch to previous client' ( { switch-client -p }",
-		"bind -N 'Switch to next client' ) { switch-client -n }",
+		"bind -N 'Switch client to previous session' ( { switch-client -p }",
+		"bind -N 'Switch client to next session' ) { switch-client -n }",
 		"bind -N 'Rename current window' , { command-prompt -I'#W' { rename-window -- '%%' } }",
 		"bind -N 'Delete the most recent paste buffer' - { delete-buffer }",
 		"bind -N 'Move the current window' . { command-prompt { move-window -t '%%' } }",
@@ -532,11 +531,13 @@ key_bindings_init(void)
 
 		/* Mouse button 1 down on status line. */
 		"bind -n MouseDown1Status { switch-client -t= }",
+		"bind -n MouseDown1SideStatus { switch-client -t= }",
 		"bind -n C-MouseDown1Status { swap-window -t@ }",
+		"bind -n C-MouseDown1SideStatus { swap-window -t@ }",
 
 		/* Mouse button 1 drag on side status border. */
-		"bind -n MouseDrag1StatusBorder { if -F '#{e|>=:#{client_width},3}' { run -C \"set -t '#{session_id}' side-status-width #{?#{==:#{side-status},left},#{e|+:#{?#{e|<:#{mouse_absolute_x},1},1,#{?#{e|>:#{mouse_absolute_x},#{e|-:#{client_width},2}},#{e|-:#{client_width},2},#{mouse_absolute_x}}},1},#{e|-:#{client_width},#{?#{e|<:#{mouse_absolute_x},1},1,#{?#{e|>:#{mouse_absolute_x},#{e|-:#{client_width},2}},#{e|-:#{client_width},2},#{mouse_absolute_x}}}}}\" } }",
-		"bind -n DoubleClick1StatusBorder { set -u side-status-width }",
+		"bind -n MouseDrag1SideStatusBorder { if -F '#{e|>=:#{client_width},3}' { run -C \"set -t '#{session_id}' side-status-width #{?#{==:#{side-status},left},#{e|+:#{?#{e|<:#{mouse_absolute_x},1},1,#{?#{e|>:#{mouse_absolute_x},#{e|-:#{client_width},2}},#{e|-:#{client_width},2},#{mouse_absolute_x}}},1},#{e|-:#{client_width},#{?#{e|<:#{mouse_absolute_x},1},1,#{?#{e|>:#{mouse_absolute_x},#{e|-:#{client_width},2}},#{e|-:#{client_width},2},#{mouse_absolute_x}}}}}\" } }",
+		"bind -n DoubleClick1SideStatusBorder { set -u side-status-width }",
 
 		/* Mouse button 1 down on default pane-border-format */
 		"bind -n MouseDown1Control9 { display-menu -t= -xM -yM -O -T 'Kill pane #{pane_index}?' 'Yes' 'y' { kill-pane -t= } 'No' 'n' {}}",
@@ -545,17 +546,23 @@ key_bindings_init(void)
 
 		/* Mouse wheel down on status line. */
 		"bind -n WheelDownStatus { next-window }",
+		"bind -n WheelDownSideStatus { next-window }",
 
 		/* Mouse wheel up on status line. */
 		"bind -n WheelUpStatus { previous-window }",
+		"bind -n WheelUpSideStatus { previous-window }",
 
 		/* Mouse button 3 down on status left. */
 		"bind -n MouseDown3StatusLeft { run -C \"display-menu -t= -xM -yW -T '#[align=centre]#{session_name}' " DEFAULT_SESSION_MENU "\" }",
+		"bind -n MouseDown3SideStatusLeft { run -C \"display-menu -t= -xM -yW -T '#[align=centre]#{session_name}' " DEFAULT_SESSION_MENU "\" }",
 		"bind -n M-MouseDown3StatusLeft { run -C \"display-menu -t= -xM -yW -T '#[align=centre]#{session_name}' " DEFAULT_SESSION_MENU "\" }",
+		"bind -n M-MouseDown3SideStatusLeft { run -C \"display-menu -t= -xM -yW -T '#[align=centre]#{session_name}' " DEFAULT_SESSION_MENU "\" }",
 
 		/* Mouse button 3 down on status line. */
 		"bind -n MouseDown3Status { display-menu -t= -xW -yW -T '#[align=centre]#{window_index}:#{window_name}' " DEFAULT_WINDOW_MENU "}",
+		"bind -n MouseDown3SideStatus { display-menu -t= -xW -yW -T '#[align=centre]#{window_index}:#{window_name}' " DEFAULT_WINDOW_MENU "}",
 		"bind -n M-MouseDown3Status { display-menu -t= -xW -yW -T '#[align=centre]#{window_index}:#{window_name}' " DEFAULT_WINDOW_MENU "}",
+		"bind -n M-MouseDown3SideStatus { display-menu -t= -xW -yW -T '#[align=centre]#{window_index}:#{window_name}' " DEFAULT_WINDOW_MENU "}",
 
 		/* Mouse button 3 down on pane. */
 		"bind -n MouseDown3Pane { if -Ft= '#{||:#{mouse_any_flag},#{&&:#{pane_in_mode},#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}}}' { select-pane -t=; send -M } { display-menu -t= -xM -yM -T '#[align=centre]#{pane_index} (#{pane_id})' " DEFAULT_PANE_MENU " } }",

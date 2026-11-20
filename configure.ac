@@ -129,13 +129,13 @@ AM_CONDITIONAL(NEED_FUZZING, test "x$enable_fuzzing" = xyes)
 AM_CONDITIONAL(IS_GCC, test "x$GCC" = xyes -a "x$enable_fuzzing" != xyes)
 
 # Is this Sun CC?
-AC_EGREP_CPP(
-	yes,
+AC_COMPILE_IFELSE([AC_LANG_SOURCE(
 	[
-		#ifdef __SUNPRO_C
-		yes
+		#ifndef __SUNPRO_C
+		#error __SUNPRO_C is not defined
 		#endif
-	],
+		int dummy;
+	])],
 	found_suncc=yes,
 	found_suncc=no
 )
@@ -465,7 +465,7 @@ if test "x$try_utf8proc" = xyes; then
 		libutf8proc,
 		[
 			AM_CPPFLAGS="$LIBUTF8PROC_CFLAGS $AM_CPPFLAGS"
-			CPPFLAGS="$LIBUTF8PROC_CFLAGS $SAVED_CPPFLAGS"
+			CPPFLAGS="$AM_CPPFLAGS $SAVED_CPPFLAGS"
 			LIBS="$LIBUTF8PROC_LIBS $LIBS"
 			utf8proc_version=`$PKG_CONFIG --modversion libutf8proc 2>/dev/null`
 			test "x$utf8proc_version" = x && utf8proc_version=on
@@ -761,30 +761,28 @@ fi
 # others, UNIX 03 (_XOPEN_SOURCE 600, see standards(7) on Solaris).
 XOPEN_DEFINES=
 AC_MSG_CHECKING(for CMSG_DATA)
-AC_EGREP_CPP(
-	yes,
+AC_COMPILE_IFELSE([AC_LANG_SOURCE(
 	[
 		#include <sys/socket.h>
-		#ifdef CMSG_DATA
-		yes
+		#ifndef CMSG_DATA
+		#error CMSG_DATA is not defined
 		#endif
-	],
+	])],
 	found_cmsg_data=yes,
 	found_cmsg_data=no
 )
 AC_MSG_RESULT($found_cmsg_data)
 if test "x$found_cmsg_data" = xno; then
 	AC_MSG_CHECKING(if CMSG_DATA needs _XOPEN_SOURCE_EXTENDED)
-	AC_EGREP_CPP(
-		yes,
+	AC_COMPILE_IFELSE([AC_LANG_SOURCE(
 		[
 			#define _XOPEN_SOURCE 1
 			#define _XOPEN_SOURCE_EXTENDED 1
 			#include <sys/socket.h>
-			#ifdef CMSG_DATA
-			yes
+			#ifndef CMSG_DATA
+			#error CMSG_DATA is not defined
 			#endif
-		],
+		])],
 		found_cmsg_data=yes,
 		found_cmsg_data=no
 	)
@@ -795,15 +793,14 @@ if test "x$found_cmsg_data" = xno; then
 fi
 if test "x$found_cmsg_data" = xno; then
 	AC_MSG_CHECKING(if CMSG_DATA needs _XOPEN_SOURCE 600)
-	AC_EGREP_CPP(
-		yes,
+	AC_COMPILE_IFELSE([AC_LANG_SOURCE(
 		[
 			#define _XOPEN_SOURCE 600
 			#include <sys/socket.h>
-			#ifdef CMSG_DATA
-			yes
+			#ifndef CMSG_DATA
+			#error CMSG_DATA is not defined
 			#endif
-		],
+		])],
 		found_cmsg_data=yes,
 		found_cmsg_data=no
 	)

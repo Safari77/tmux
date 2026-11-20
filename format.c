@@ -1,4 +1,4 @@
-/* $OpenBSD: format.c,v 1.433 2026/10/20 06:32:54 nicm Exp $ */
+/* $OpenBSD: format.c,v 1.437 2026/11/16 14:00:11 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -167,8 +167,14 @@ enum format_type {
 	FORMAT_TYPE_PANE
 };
 
+/* Sort criteria. */
 static struct sort_criteria sort_crit;
 
+/* Cached time. */
+static time_t format_last_time;
+static struct tm format_last_tm;
+
+/* Format tree. */
 struct format_tree {
 	enum format_type	 type;
 
@@ -1236,6 +1242,15 @@ format_cb_pane_in_mode(struct format_tree *ft)
 	return (value);
 }
 
+/* Is this a tiled pane with separate borders? */
+static int
+format_pane_is_separate(struct window_pane *wp)
+{
+	if (window_pane_is_floating(wp))
+		return (0);
+	return (window_border_type_is_separate(wp->window));
+}
+
 /* Callback for pane_at_top. */
 static void *
 format_cb_pane_at_top(struct format_tree *ft)
@@ -1248,7 +1263,9 @@ format_cb_pane_at_top(struct format_tree *ft)
 		return (NULL);
 
 	status = window_pane_get_pane_status(wp);
-	if (status == PANE_STATUS_TOP)
+	if (format_pane_is_separate(wp))
+		flag = (wp->yoff <= 1);
+	else if (status == PANE_STATUS_TOP)
 		flag = (wp->yoff == 1);
 	else
 		flag = (wp->yoff == 0);
@@ -1270,7 +1287,9 @@ format_cb_pane_at_bottom(struct format_tree *ft)
 	w = wp->window;
 
 	status = window_pane_get_pane_status(wp);
-	if (status == PANE_STATUS_BOTTOM)
+	if (format_pane_is_separate(wp))
+		flag = (wp->yoff + (int)wp->sy >= (int)w->sy - 1);
+	else if (status == PANE_STATUS_BOTTOM)
 		flag = (wp->yoff + (int)wp->sy == (int)w->sy - 1);
 	else
 		flag = (wp->yoff + (int)wp->sy == (int)w->sy);
@@ -1811,6 +1830,23 @@ format_cb_client_written(struct format_tree *ft)
 	return (NULL);
 }
 
+/* Callback for client_active_theme. */
+static void *
+format_cb_client_active_theme(struct format_tree *ft)
+{
+	if (ft->c != NULL) {
+		switch (ft->c->active_theme) {
+		case THEME_DARK:
+			return (xstrdup("dark"));
+		case THEME_LIGHT:
+			return (xstrdup("light"));
+		case THEME_UNKNOWN:
+			return (NULL);
+		}
+	}
+	return (NULL);
+}
+
 /* Callback for client_theme. */
 static void *
 format_cb_client_theme(struct format_tree *ft)
@@ -2257,6 +2293,8 @@ format_cb_pane_at_left(struct format_tree *ft)
 		xoff -= wp->scrollbar_style.width + wp->scrollbar_style.pad;
 	if (xoff == 0)
 		return (xstrdup("1"));
+	if (format_pane_is_separate(wp) && xoff == 1)
+		return (xstrdup("1"));
 	return (xstrdup("0"));
 }
 
@@ -2265,7 +2303,7 @@ static void *
 format_cb_pane_at_right(struct format_tree *ft)
 {
 	struct window_pane	*wp = ft->wp;
-	int			 right;
+	int			 right, wsx;
 
 	if (wp == NULL)
 		return (NULL);
@@ -2273,7 +2311,10 @@ format_cb_pane_at_right(struct format_tree *ft)
 	if (wp->window->sb_pos == PANE_SCROLLBARS_RIGHT &&
 	    window_pane_scrollbar_reserve(wp))
 		right += wp->scrollbar_style.width + wp->scrollbar_style.pad;
-	if (right == (int)wp->window->sx)
+	wsx = (int)wp->window->sx;
+	if (right == wsx)
+		return (xstrdup("1"));
+	if (format_pane_is_separate(wp) && right == wsx - 1)
 		return (xstrdup("1"));
 	return (xstrdup("0"));
 }
@@ -2687,6 +2728,33 @@ format_cb_pane_pb_state(struct format_tree *ft)
 	return (NULL);
 }
 
+/* Callback for pane_program_message. */
+static void *
+format_cb_pane_program_message(struct format_tree *ft)
+{
+	if (ft->wp == NULL || ft->wp->program_message == NULL)
+		return (NULL);
+	return (xstrdup(ft->wp->program_message));
+}
+
+/* Callback for pane_program_name. */
+static void *
+format_cb_pane_program_name(struct format_tree *ft)
+{
+	if (ft->wp == NULL || ft->wp->program_name == NULL)
+		return (NULL);
+	return (xstrdup(ft->wp->program_name));
+}
+
+/* Callback for pane_program_state. */
+static void *
+format_cb_pane_program_state(struct format_tree *ft)
+{
+	if (ft->wp == NULL || ft->wp->program_state == NULL)
+		return (NULL);
+	return (xstrdup(ft->wp->program_state));
+}
+
 /* Callback for pane_right. */
 static void *
 format_cb_pane_right(struct format_tree *ft)
@@ -2756,8 +2824,8 @@ format_cb_pane_unzoomed_height(struct format_tree *ft)
 	struct window_pane	*wp = ft->wp;
 	struct window		*w;
 	struct layout_cell	*lc, *root;
-	int			 status, floating;
-	u_int			 sy;
+	int			 status, floating, xoff, yoff;
+	u_int			 sx, sy;
 
 	if (wp == NULL)
 		return (NULL);
@@ -2778,7 +2846,12 @@ format_cb_pane_unzoomed_height(struct format_tree *ft)
 		status = window_get_pane_status(w);
 	else
 		status = window_pane_get_pane_status(wp);
-	if (!floating &&
+	if (window_border_type_is_separate(w)) {
+		xoff = lc->g.xoff;
+		yoff = lc->g.yoff;
+		sx = lc->g.sx;
+		layout_apply_borders(w, root, lc, &xoff, &yoff, &sx, &sy);
+	} else if (!floating &&
 	    root != NULL &&
 	    layout_add_horizontal_border(root, lc, status) &&
 	    sy > 1)
@@ -2792,12 +2865,14 @@ static void *
 format_cb_pane_unzoomed_width(struct format_tree *ft)
 {
 	struct window_pane	*wp = ft->wp;
-	struct layout_cell	*lc;
-	int			 saved, sb_w, sb_pad;
-	u_int			 sx;
+	struct window		*w;
+	struct layout_cell	*lc, *root;
+	int			 saved, sb_w, sb_pad, xoff, yoff;
+	u_int			 sx, sy;
 
 	if (wp == NULL)
 		return (NULL);
+	w = wp->window;
 
 	lc = wp->saved_layout_cell;
 	saved = (lc != NULL);
@@ -2807,8 +2882,16 @@ format_cb_pane_unzoomed_width(struct format_tree *ft)
 		return (NULL);
 	sx = lc->g.sx;
 
+	root = w->saved_layout_root;
+	if (root == NULL)
+		root = w->layout_root;
+	xoff = lc->g.xoff;
+	yoff = lc->g.yoff;
+	sy = lc->g.sy;
+	layout_apply_borders(w, root, lc, &xoff, &yoff, &sx, &sy);
+
 	if ((saved && !SCREEN_IS_ALTERNATE(&wp->base) &&
-	    wp->window->sb == PANE_SCROLLBARS_ALWAYS) ||
+	    w->sb == PANE_SCROLLBARS_ALWAYS) ||
 	    (!saved && window_pane_scrollbar_reserve(wp))) {
 		sb_w = wp->scrollbar_style.width;
 		sb_pad = wp->scrollbar_style.pad;
@@ -3666,6 +3749,9 @@ static const struct format_table_entry format_table[] = {
 	{ "buffer_size", FORMAT_TABLE_STRING,
 	  format_cb_buffer_size
 	},
+	{ "client_active_theme", FORMAT_TABLE_STRING,
+	  format_cb_client_active_theme
+	},
 	{ "client_activity", FORMAT_TABLE_TIME,
 	  format_cb_client_activity
 	},
@@ -4004,6 +4090,15 @@ static const struct format_table_entry format_table[] = {
 	},
 	{ "pane_private_modes", FORMAT_TABLE_STRING,
 	  format_cb_pane_private_modes
+	},
+	{ "pane_program_message", FORMAT_TABLE_STRING,
+	  format_cb_pane_program_message
+	},
+	{ "pane_program_name", FORMAT_TABLE_STRING,
+	  format_cb_pane_program_name
+	},
+	{ "pane_program_state", FORMAT_TABLE_STRING,
+	  format_cb_pane_program_state
 	},
 	{ "pane_right", FORMAT_TABLE_STRING,
 	  format_cb_pane_right
@@ -6807,7 +6902,11 @@ format_expand1(struct format_expand_state *es, const char *fmt)
 	if ((es->flags & FORMAT_EXPAND_TIME) && strchr(fmt, '%') != NULL) {
 		if (es->time == 0) {
 			es->time = time(NULL);
-			localtime_r(&es->time, &es->tm);
+			if (format_last_time != es->time) {
+				localtime_r(&es->time, &format_last_tm);
+				format_last_time = es->time;
+			}
+			memcpy(&es->tm, &format_last_tm, sizeof es->tm);
 		}
 		if (format_strftime(expanded, sizeof expanded, fmt,
 		    &es->tm) == 0) {

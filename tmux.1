@@ -1,4 +1,4 @@
-.\" $OpenBSD: tmux.1,v 1.1191 2026/10/20 06:45:56 nicm Exp $
+.\" $OpenBSD: tmux.1,v 1.1200 2026/11/16 14:00:11 nicm Exp $
 .\"
 .\" Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
 .\"
@@ -14,7 +14,7 @@
 .\" IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: October 20 2026 $
+.Dd $Mdocdate: November 16 2026 $
 .Dt TMUX 1
 .Os
 .Sh NAME
@@ -1450,7 +1450,7 @@ and sets an environment variable for the newly created session; it may be
 specified multiple times.
 .Tg refresh
 .It Xo Ic refresh\-client
-.Op Fl cDlLRSU
+.Op Fl cDlLqRSU
 .Op Fl A Ar pane:state
 .Op Fl B Ar name:what:format
 .Op Fl C Ar size
@@ -1576,6 +1576,9 @@ a colon, then a report escape sequence.
 requests the clipboard from the client using the
 .Xr xterm 1
 escape sequence and stores it in a new paste buffer.
+.Pp
+.Fl q
+queries the client terminal for its size.
 .Pp
 .Fl L ,
 .Fl R ,
@@ -2189,6 +2192,18 @@ before the target.
 (emacs: M\-x)
 .Xc
 Jump to the last mark.
+.It Xo
+.Ic keep\-column\-on
+.Xc
+Keep the cursor column when moving vertically.
+.It Xo
+.Ic keep\-column\-off
+.Xc
+Do not keep the cursor column when moving vertically.
+.It Xo
+.Ic keep\-column\-toggle
+.Xc
+Toggle keeping the cursor column when moving vertically.
 .It Xo
 .Ic line\-numbers\-on
 .Xc
@@ -2894,7 +2909,7 @@ The pane must not already be floating or hidden, and the window must not
 be zoomed.
 .Tg capturep
 .It Xo Ic capture\-pane
-.Op Fl aeFHILpPRqCJMN
+.Op Fl aeFHILpPRqCJMNT
 .Op Fl b Ar buffer\-name
 .Op Fl E Ar end\-line
 .Op Fl S Ar start\-line
@@ -2973,7 +2988,7 @@ the end of the visible pane.
 The default is to capture only the visible contents of the pane.
 .It Xo
 .Ic choose\-client
-.Op Fl hkNryZ
+.Op Fl hikNryZ
 .Op Fl F Ar format
 .Op Fl f Ar filter
 .Op Fl K Ar key\-format
@@ -3049,6 +3064,8 @@ a format for each shortcut key; both are evaluated once for each line.
 .Pp
 .Fl N
 starts without the preview or if given twice with the larger preview.
+.Fl i
+starts showing client information instead of the preview.
 .Fl h
 hides the pane containing the mode.
 .Fl k
@@ -3153,7 +3170,7 @@ first.
 .Fl N
 starts without the preview or if given twice with the larger preview.
 .Fl i
-starts showing client information instead of the preview.
+starts showing session, window and pane information instead of the preview.
 .Fl h
 hides the pane containing the mode.
 .Fl k
@@ -3171,17 +3188,18 @@ The
 command works only if at least one client is attached.
 .It Xo
 .Ic customize\-mode
-.Op Fl kNZ
+.Op Fl kNyZ
 .Op Fl F Ar format
 .Op Fl f Ar filter
 .Op Fl t Ar target\-pane
-.Op Ar template
 .Xc
 Put a pane into customize mode, where options and key bindings may be browsed
 and modified from a list.
 Option values in the list are shown for the active pane in the current window.
 .Fl Z
 zooms the pane.
+.Fl y
+disables any confirmation prompts.
 The following keys may be used in customize mode:
 .Bl -column "KeyXXXXXX" "Function" -offset indent
 .It Sy "Key" Ta Sy "Function"
@@ -3305,7 +3323,7 @@ option.
 .It Xo
 .Tg displayp
 .Ic display\-panes
-.Op Fl kNZ
+.Op Fl kNPZ
 .Op Fl d Ar duration
 .Op Fl s Ar source\-window
 .Op Fl t Ar target\-pane
@@ -3358,6 +3376,9 @@ substituted by the pane ID.
 The default
 .Ar template
 is "select\-pane \-t \[aq]%%\[aq]".
+If
+.Fl P
+is given, the selected pane ID is printed.
 .Tg findw
 .It Xo Ic find\-window
 .Op Fl iCNrTZ
@@ -4964,6 +4985,11 @@ Whether tmux should use the detected client theme
 use terminal ANSI colours
 .Pq Cm terminal ,
 or force the light or dark theme.
+With
+.Cm detect ,
+the theme reported by the terminal is used if available, otherwise the theme is
+derived from the terminal background colour.
+If neither is available, the dark theme is used.
 .It Xo Ic dark\-theme\-black ,
 .Ic dark\-theme\-white ,
 .Ic dark\-theme\-light\-grey ,
@@ -6099,6 +6125,11 @@ and
 .Cm hybrid ,
 they use absolute line numbers.
 .Pp
+.It Xo Ic copy\-mode\-keep\-column
+.Op Cm on | off
+.Xc
+When on, keep the cursor column when moving vertically in copy mode.
+.Pp
 .It Xo Ic mode\-keys
 .Op Cm vi | emacs
 .Xc
@@ -6238,6 +6269,20 @@ see the
 .Sx STYLES
 section.
 Attributes are ignored.
+.Pp
+.It Xo Ic pane\-border\-type
+.Op Ic joined | separate | separate\-active
+.Xc
+Set how pane borders are drawn.
+If
+.Ic joined ,
+adjacent panes share a single border;
+.Ic separate ,
+a full border is drawn around each pane; and
+.Ic separate\-active ,
+panes are laid out as for
+.Ic separate
+but the border is only drawn around the active pane.
 .Pp
 .It Xo Ic pane\-scrollbars
 .Op Cm off | modal | on | auto\-hide
@@ -6872,13 +6917,19 @@ allows mouse events to be bound as keys.
 The name of each key is made up of a mouse event (such as
 .Ql MouseUp1 )
 and a location suffix, one of the following:
-.Bl -column "XXXXXXXXXXXXX" -offset indent
+.Bl -column "SideStatusControlN" -offset indent
 .It Li "Pane" Ta "the contents of a pane"
 .It Li "Border" Ta "a pane border"
 .It Li "Status" Ta "the status line window list"
 .It Li "StatusLeft" Ta "the left part of the status line"
 .It Li "StatusRight" Ta "the right part of the status line"
 .It Li "StatusDefault" Ta "any other part of the status line"
+.It Li "SideStatus" Ta "a tagged range in the side status line"
+.It Li "SideStatusLeft" Ta "a left range in the side status line"
+.It Li "SideStatusRight" Ta "a right range in the side status line"
+.It Li "SideStatusDefault" Ta "any other part of the side status line"
+.It Li "SideStatusBorder" Ta "the border between the side status line and panes"
+.It Li "SideStatusControlN" Ta "control range N in the side status line"
 .It Li "ScrollbarSlider" Ta "the scrollbar slider"
 .It Li "ScrollbarUp" Ta "above the scrollbar slider"
 .It Li "ScrollbarDown" Ta "below the scrollbar slider"
@@ -7487,6 +7538,7 @@ The following variables are available, where appropriate:
 .It Li "buffer_name" Ta "" Ta "Name of buffer"
 .It Li "buffer_sample" Ta "" Ta "Sample of start of buffer"
 .It Li "buffer_size" Ta "" Ta "Size of the specified buffer in bytes"
+.It Li "client_active_theme" Ta "" Ta "Theme in use"
 .It Li "client_activity" Ta "" Ta "Time client last had activity"
 .It Li "client_cell_height" Ta "" Ta "Height of each client cell in pixels"
 .It Li "client_cell_width" Ta "" Ta "Width of each client cell in pixels"
@@ -7506,6 +7558,7 @@ The following variables are available, where appropriate:
 .It Li "client_termfeatures" Ta "" Ta "Terminal features of client, if any"
 .It Li "client_termname" Ta "" Ta "Terminal name of client"
 .It Li "client_termtype" Ta "" Ta "Terminal type of client, if available"
+.It Li "client_theme" Ta "" Ta "Theme reported by the terminal (light or dark), if any"
 .It Li "client_tty" Ta "" Ta "Pseudo terminal of client"
 .It Li "client_uid" Ta "" Ta "UID of client process"
 .It Li "client_user" Ta "" Ta "User of client process"
@@ -7651,6 +7704,9 @@ The following variables are available, where appropriate:
 .It Li "pane_private_modes" Ta "" Ta "List of enabled DECSET private modes"
 .It Li "pane_pb_state" Ta "" Ta "Pane progress bar state, one of hidden, normal, error, indeterminate, paused (can be set by application)"
 .It Li "pane_pb_progress" Ta "" Ta "Pane progress bar progress percentage (can be set by application)"
+.It Li "pane_program_message" Ta "" Ta "OSC 7501 program message"
+.It Li "pane_program_name" Ta "" Ta "OSC 7501 program name"
+.It Li "pane_program_state" Ta "" Ta "OSC 7501 program state: idle, working, done, blocked or error"
 .It Li "pane_right" Ta "" Ta "Right of pane"
 .It Li "pane_search_string" Ta "" Ta "Last search string in copy mode"
 .It Li "pane_start_command" Ta "" Ta "Command pane started with"
@@ -7923,7 +7979,22 @@ replaces the previous saved default).
 .Xc
 Mark a range for mouse events in the
 .Ic status\-format
+or
+.Ic side\-status\-format
 option.
+In the side status line, the bindings described below use
+.Ql SideStatus ,
+.Ql SideStatusLeft ,
+.Ql SideStatusRight
+and
+.Ql SideStatusControlN
+instead of
+.Ql Status ,
+.Ql StatusLeft ,
+.Ql StatusRight
+and
+.Ql ControlN .
+.Pp
 When a mouse event occurs in the
 .Ic range=left
 or

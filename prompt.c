@@ -1,4 +1,4 @@
-/* $OpenBSD: prompt.c,v 1.8 2026/10/13 07:56:00 nicm Exp $ */
+/* $OpenBSD: prompt.c,v 1.10 2026/11/13 10:54:32 nicm Exp $ */
 
 /*
  * Copyright (c) 2026 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -297,6 +297,8 @@ prompt_update(struct prompt *pr, const char *msg, const char *input)
 		tmp = format_expand_time(ft, input);
 	pr->buffer = utf8_fromcstr(tmp);
 	pr->index = utf8_strlen(pr->buffer);
+	if (pr->flags & PROMPT_COMMANDMODE && pr->index != 0)
+		pr->index--;
 	free(tmp);
 
 	memset(pr->hindex, 0, sizeof pr->hindex);
@@ -596,20 +598,10 @@ prompt_mouse_complete(struct prompt *pr, u_int x, u_int cx, u_int ax, u_int aw,
 	return (PROMPT_KEY_HANDLED);
 }
 
-/* Draw prompt. */
+/* Set screen cursor defaults for a prompt. */
 void
-prompt_draw(struct prompt *pr, struct prompt_draw_data *pd)
+prompt_set_cursor(struct prompt *pr, struct screen *s)
 {
-	struct screen_write_ctx	*ctx = pd->ctx;
-	struct screen		*s = ctx->s;
-	u_int			 ax = pd->area_x, py = pd->prompt_line, *cx;
-	u_int			 aw = pd->area_width;
-	struct grid_cell	 gc;
-	struct prompt_layout	 pl;
-	struct style		 sy;
-	u_int			 i, width, pcursor;
-	char			*expanded;
-
 	if (pr->flags & PROMPT_COMMANDMODE) {
 		s->default_cstyle = pr->command_cstyle;
 		s->default_mode = pr->command_cmode;
@@ -619,7 +611,22 @@ prompt_draw(struct prompt *pr, struct prompt_draw_data *pd)
 		s->default_mode = pr->cmode;
 		s->default_ccolour = pr->ccolour;
 	}
+}
 
+/* Draw prompt. */
+void
+prompt_draw(struct prompt *pr, struct prompt_draw_data *pd)
+{
+	struct screen_write_ctx	*ctx = pd->ctx;
+	u_int			 ax = pd->area_x, py = pd->prompt_line, *cx;
+	u_int			 aw = pd->area_width;
+	struct grid_cell	 gc;
+	struct prompt_layout	 pl;
+	struct style		 sy;
+	u_int			 i, width, pcursor;
+	char			*expanded;
+
+	prompt_set_cursor(pr, ctx->s);
 	prompt_layout(pr, ax, aw, &pl, &expanded, &sy);
 	memcpy(&gc, &sy.gc, sizeof gc);
 	cx = pd->cursor_x;
@@ -701,6 +708,10 @@ prompt_mouse(struct prompt *pr, u_int x, u_int ax, u_int aw, int *redraw)
 			break;
 		width += ud->width;
 	}
+	if (pr->flags & PROMPT_COMMANDMODE &&
+	    idx != 0 &&
+	    pr->buffer[idx].size == 0)
+		idx--;
 	if (idx == pr->index)
 		return (PROMPT_KEY_HANDLED);
 
@@ -1485,6 +1496,10 @@ process_key:
 		goto append_key;
 	}
 
+	if (pr->flags & PROMPT_COMMANDMODE &&
+	    pr->index != 0 &&
+	    pr->buffer[pr->index].size == 0)
+		pr->index--;
 	*redraw = 1;
 	return (PROMPT_KEY_HANDLED);
 
@@ -1528,6 +1543,10 @@ append_key:
 	}
 
 changed:
+	if (pr->flags & PROMPT_COMMANDMODE &&
+	    pr->index != 0 &&
+	    pr->buffer[pr->index].size == 0)
+		pr->index--;
 	*redraw = 1;
 	if (pr->flags & PROMPT_INCREMENTAL) {
 		s = utf8_tocstr(pr->buffer);
